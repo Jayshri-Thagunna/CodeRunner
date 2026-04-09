@@ -2,9 +2,13 @@
   "name": "coderunner",
   "version": "1.0.0",
   "private": true,
-  "description": "Static CodeRunner app served on port 3000",
+  "description": "Browser IDE — frontend static server + Express API backend",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "concurrently --names \"frontend,backend\" --prefix-colors \"cyan,green\" \"node server.js\" \"node --env-file=backend/.env backend/src/index.js\"",
+    "frontend": "node server.js",
+    "backend": "node --env-file=backend/.env backend/src/index.js"
+  },
+  "dependencies": {
+    "concurrently": "^9.1.2"
   }
 }
