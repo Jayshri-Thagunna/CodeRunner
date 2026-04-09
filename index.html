@@ -70,29 +70,15 @@
 
       <!-- Explorer Panel -->
       <div id="panel-explorer" class="sidebar-panel">
+        <div class="explorer-actions">
+          <button id="newFileBtn" class="new-file-btn" type="button">+ New File</button>
+        </div>
         <div class="tree">
           <div class="tree-folder" id="folderToggle">
             <svg class="folder-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
             <span>PHP-CODELAB-PROJECT</span>
           </div>
-          <div id="fileTree">
-            <div class="tree-item active" data-file="index.php">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              <span>index.php</span>
-            </div>
-            <div class="tree-item" data-file="styles.css">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              <span>styles.css</span>
-            </div>
-            <div class="tree-item folder-item" data-file="assets">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-              <span>assets</span>
-            </div>
-            <div class="tree-item" data-file="config.json">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fb923c" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              <span>config.json</span>
-            </div>
-          </div>
+          <div id="fileTree"></div>
         </div>
       </div>
 
@@ -109,7 +95,7 @@
         <div class="git-info">
           <div class="git-row"><span class="git-label">Branch:</span><span class="git-val">main*</span></div>
           <div class="git-row"><span class="git-label">Changes:</span><span class="git-val" id="gitChanges">0</span></div>
-          <div class="git-row"><span class="git-label">Status:</span><span class="git-val green">Clean</span></div>
+          <div class="git-row"><span class="git-label">Status:</span><span class="git-val green" id="gitStatus">Clean</span></div>
         </div>
       </div>
 
@@ -155,15 +141,7 @@
 
         <!-- Code Area -->
         <div class="code-area" id="codeArea">
-          <div class="line-numbers" id="lineNumbers"></div>
-          <textarea
-            id="codeEditor"
-            class="code-editor"
-            spellcheck="false"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-          ></textarea>
+          <div id="monacoEditor" class="monaco-host"></div>
         </div>
 
         <!-- Notification toast -->
@@ -212,6 +190,7 @@
     </div>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
