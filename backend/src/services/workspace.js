@@ -77,10 +77,18 @@ function greet(string $name): string {
 ?>`,
 };
 
-export async function createSession(sessionId) {
+export async function createSession(sessionId, { userId = '', name = '' } = {}) {
   const dir = path.join(config.workspaceRoot, sessionId);
   await fs.mkdir(dir, { recursive: true });
-  logger.info('Session created', { sessionId });
+
+  // Persist metadata so we can list sessions per user
+  await fs.writeFile(
+    path.join(dir, '.meta.json'),
+    JSON.stringify({ userId, name: name || 'Untitled project', createdAt: new Date().toISOString() }),
+    'utf8'
+  );
+
+  logger.info('Session created', { sessionId, userId });
 
   const files = [];
   for (const [name, content] of Object.entries(STARTER_FILES)) {
@@ -95,11 +103,43 @@ export async function listFiles(sessionId) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
-    if (!entry.isFile()) continue;
+    if (!entry.isFile() || entry.name === '.meta.json') continue;
     const stat = await fs.stat(path.join(dir, entry.name));
     files.push({ name: entry.name, size: stat.size, updatedAt: stat.mtime.toISOString() });
   }
   return files;
+}
+
+export async function listSessionsForUser(userId) {
+  let entries;
+  try {
+    entries = await fs.readdir(config.workspaceRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const sessions = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const metaPath = path.join(config.workspaceRoot, entry.name, '.meta.json');
+    try {
+      const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+      if (meta.userId === userId) {
+        sessions.push({ sessionId: entry.name, name: meta.name, createdAt: meta.createdAt });
+      }
+    } catch {
+      // session has no meta — skip
+    }
+  }
+  return sessions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+export async function renameSession(sessionId, name) {
+  const dir = await ensureSessionExists(sessionId);
+  const metaPath = path.join(dir, '.meta.json');
+  let meta = {};
+  try { meta = JSON.parse(await fs.readFile(metaPath, 'utf8')); } catch {}
+  meta.name = name;
+  await fs.writeFile(metaPath, JSON.stringify(meta), 'utf8');
 }
 
 export async function readFile(sessionId, filename) {

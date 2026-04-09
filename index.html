@@ -53,6 +53,9 @@
       <div class="activity-icon" data-panel="git" title="Source Control">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
       </div>
+      <div class="activity-icon" data-panel="sessions" title="Sessions">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="17" width="18" height="4" rx="1"/></svg>
+      </div>
       <div class="activity-icon" data-panel="extensions" title="Extensions">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
       </div>
@@ -80,6 +83,14 @@
           </div>
           <div id="fileTree"></div>
         </div>
+      </div>
+
+      <!-- Sessions Panel -->
+      <div id="panel-sessions" class="sidebar-panel hidden">
+        <div class="explorer-actions" style="display:flex;gap:6px">
+          <button id="newSessionBtn" class="new-file-btn" type="button">+ New Session</button>
+        </div>
+        <div id="sessionList" class="session-list"></div>
       </div>
 
       <!-- Search Panel -->

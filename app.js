@@ -13,7 +13,18 @@ async function apiFetch(path, options = {}) {
 const files = {}; // name → content string | null (null = not yet loaded)
 
 // ── State ───────────────────────────────────────────────────────────────────
+let userId    = localStorage.getItem('ide_user_id') || (() => {
+  const id = typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+  localStorage.setItem('ide_user_id', id);
+  return id;
+})();
 let sessionId = null;
+let sessionName = 'Untitled project';
 let openTabs = [];
 let activeFile = null;
 let autoRunTimeout = null;
@@ -77,28 +88,120 @@ async function initSession() {
     }
 
     if (!sessionId) {
-      const res = await apiFetch('/api/sessions', { method: 'POST' });
+      const res = await apiFetch('/api/sessions', { method: 'POST', body: JSON.stringify({ userId }) });
       if (!res.ok) throw new Error('Failed to create session');
       const data = await res.json();
       sessionId = data.sessionId;
+      sessionName = data.name;
       localStorage.setItem('ide_session_id', sessionId);
       for (const f of data.files) files[f.name] = null;
     }
 
-    // Pre-load all file contents
     await Promise.all(Object.keys(files).map(loadFileContent));
-
     openTabs = Object.keys(files).slice(0, 2);
     activeFile = openTabs[0] || null;
 
     renderFileTree();
     renderTabs();
+    updateSessionLabel();
     if (activeFile) switchFile(activeFile);
     updateGitBadge();
+    await renderSessionList();
   } catch (err) {
     console.error('Session init failed:', err);
     showToast('Cannot reach backend — is the API server running on port 3001?');
   }
+}
+
+// Load a different session (switch context entirely)
+async function loadSession(id) {
+  // Clear in-memory state
+  for (const key of Object.keys(files)) delete files[key];
+  for (const [, model] of models) model.dispose();
+  models.clear();
+  unsaved.clear();
+  openTabs = [];
+  activeFile = null;
+  editor.setModel(null);
+  previewFrame.removeAttribute('srcdoc');
+  previewFrame.removeAttribute('src');
+
+  const res = await apiFetch(`/api/files?sessionId=${id}`);
+  if (!res.ok) { showToast('Could not load session'); return; }
+  const { files: remoteFiles } = await res.json();
+  for (const f of remoteFiles) files[f.name] = null;
+
+  sessionId = id;
+  localStorage.setItem('ide_session_id', id);
+  await Promise.all(Object.keys(files).map(loadFileContent));
+
+  openTabs = Object.keys(files).slice(0, 2);
+  activeFile = openTabs[0] || null;
+
+  renderFileTree();
+  renderTabs();
+  updateGitBadge();
+  if (activeFile) switchFile(activeFile);
+  await renderSessionList();
+  showToast('Switched session');
+}
+
+async function createNewSession(name = '') {
+  const label = name || window.prompt('Session name:', 'New project');
+  if (!label) return;
+  const res = await apiFetch('/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ userId, name: label.trim() }),
+  });
+  if (!res.ok) { showToast('Could not create session'); return; }
+  const data = await res.json();
+  sessionName = data.name;
+  await loadSession(data.sessionId);
+}
+
+async function renderSessionList() {
+  const container = document.getElementById('sessionList');
+  if (!container) return;
+  const res = await apiFetch(`/api/sessions?userId=${userId}`);
+  if (!res.ok) { container.innerHTML = '<div class="sr-empty">Could not load sessions</div>'; return; }
+  const { sessions } = await res.json();
+
+  container.innerHTML = sessions.map(s => `
+    <div class="session-item${s.sessionId === sessionId ? ' active' : ''}" data-id="${s.sessionId}">
+      <span class="session-name" data-id="${s.sessionId}">${escapeHtml(s.name)}</span>
+      <span class="session-rename" data-id="${s.sessionId}" title="Rename">✎</span>
+    </div>`).join('') || '<div class="sr-empty">No sessions yet</div>';
+
+  container.querySelectorAll('.session-item').forEach(el => {
+    el.addEventListener('click', e => {
+      if (e.target.classList.contains('session-rename')) return;
+      const id = el.dataset.id;
+      if (id !== sessionId) loadSession(id);
+    });
+  });
+
+  container.querySelectorAll('.session-rename').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const current = container.querySelector(`.session-name[data-id="${id}"]`).textContent;
+      const newName = window.prompt('Rename session:', current);
+      if (!newName || !newName.trim()) return;
+      const res = await apiFetch(`/api/sessions/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: newName.trim() }),
+      });
+      if (res.ok) {
+        if (id === sessionId) { sessionName = newName.trim(); updateSessionLabel(); }
+        await renderSessionList();
+      }
+    });
+  });
+}
+
+function updateSessionLabel() {
+  const el = document.querySelector('.tree-folder span');
+  if (el) el.textContent = sessionName.toUpperCase();
 }
 
 async function loadFileContent(name) {
@@ -185,6 +288,7 @@ function inferLanguage(name) {
 // ── UI Bindings ───────────────────────────────────────────────────────────────
 function bindUiEvents() {
   document.getElementById('newFileBtn').addEventListener('click', createNewFile);
+  document.getElementById('newSessionBtn')?.addEventListener('click', () => createNewSession());
 
   document.getElementById('folderToggle').addEventListener('click', () => {
     const arrow = document.querySelector('.folder-arrow');
@@ -193,7 +297,7 @@ function bindUiEvents() {
     arrow.style.transform = collapsed ? '' : 'rotate(-90deg)';
   });
 
-  const panels = ['explorer', 'search', 'git', 'extensions', 'settings'];
+  const panels = ['explorer', 'search', 'git', 'sessions', 'extensions', 'settings'];
   document.querySelectorAll('.activity-icon[data-panel]').forEach(icon => {
     icon.addEventListener('click', () => {
       const panel = icon.dataset.panel;
@@ -202,8 +306,9 @@ function bindUiEvents() {
       panels.forEach(p => {
         document.getElementById(`panel-${p}`).classList.toggle('hidden', p !== panel);
       });
-      const titles = { explorer: 'EXPLORER', search: 'SEARCH', git: 'SOURCE CONTROL', extensions: 'EXTENSIONS', settings: 'SETTINGS' };
+      const titles = { explorer: 'EXPLORER', search: 'SEARCH', git: 'SOURCE CONTROL', sessions: 'SESSIONS', extensions: 'EXTENSIONS', settings: 'SETTINGS' };
       document.getElementById('sidebarTitle').textContent = titles[panel] || panel.toUpperCase();
+      if (panel === 'sessions') renderSessionList();
     });
   });
 
