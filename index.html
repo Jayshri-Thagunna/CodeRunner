@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PHP CodeLab</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Title Bar -->
+  <div class="titlebar">
+    <div class="titlebar-left">
+      <div class="logo">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <rect width="24" height="24" rx="6" fill="#22c55e"/>
+          <text x="5" y="17" font-size="13" font-weight="bold" fill="white" font-family="monospace">P</text>
+        </svg>
+        <span class="logo-text">PHP CodeLab</span>
+      </div>
+      <nav class="menu-nav">
+        <span>File</span>
+        <span>Edit</span>
+        <span>Selection</span>
+        <span>View</span>
+        <span>Go</span>
+      </nav>
+    </div>
+    <div class="titlebar-right">
+      <div class="search-bar" id="searchBar">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="searchInput" placeholder="Search project..." />
+      </div>
+      <button class="run-btn" id="runBtn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg>
+        <span id="runBtnText">Run Code</span>
+      </button>
+      <div class="avatar" title="User Profile"></div>
+    </div>
+  </div>
+
+  <!-- Main Layout -->
+  <div class="main">
+
+    <!-- Activity Bar -->
+    <div class="activity-bar">
+      <div class="activity-icon active" data-panel="explorer" title="Explorer">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      </div>
+      <div class="activity-icon" data-panel="search" title="Search">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </div>
+      <div class="activity-icon" data-panel="git" title="Source Control">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </div>
+      <div class="activity-icon" data-panel="extensions" title="Extensions">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </div>
+      <div class="activity-icon bottom" data-panel="settings" title="Settings">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span id="sidebarTitle">EXPLORER</span>
+        <span class="sidebar-more" title="More actions">···</span>
+      </div>
+
+      <!-- Explorer Panel -->
+      <div id="panel-explorer" class="sidebar-panel">
+        <div class="tree">
+          <div class="tree-folder" id="folderToggle">
+            <svg class="folder-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            <span>PHP-CODELAB-PROJECT</span>
+          </div>
+          <div id="fileTree">
+            <div class="tree-item active" data-file="index.php">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span>index.php</span>
+            </div>
+            <div class="tree-item" data-file="styles.css">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span>styles.css</span>
+            </div>
+            <div class="tree-item folder-item" data-file="assets">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <span>assets</span>
+            </div>
+            <div class="tree-item" data-file="config.json">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fb923c" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span>config.json</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Search Panel -->
+      <div id="panel-search" class="sidebar-panel hidden">
+        <div class="panel-search-box">
+          <input type="text" id="sidebarSearch" placeholder="Search in files..." />
+        </div>
+        <div id="searchResults" class="search-results"></div>
+      </div>
+
+      <!-- Git Panel -->
+      <div id="panel-git" class="sidebar-panel hidden">
+        <div class="git-info">
+          <div class="git-row"><span class="git-label">Branch:</span><span class="git-val">main*</span></div>
+          <div class="git-row"><span class="git-label">Changes:</span><span class="git-val" id="gitChanges">0</span></div>
+          <div class="git-row"><span class="git-label">Status:</span><span class="git-val green">Clean</span></div>
+        </div>
+      </div>
+
+      <!-- Extensions Panel -->
+      <div id="panel-extensions" class="sidebar-panel hidden">
+        <div class="ext-list">
+          <div class="ext-item"><span class="ext-name">PHP Intelephense</span><span class="ext-badge installed">Installed</span></div>
+          <div class="ext-item"><span class="ext-name">Prettier</span><span class="ext-badge installed">Installed</span></div>
+          <div class="ext-item"><span class="ext-name">GitLens</span><span class="ext-badge">Install</span></div>
+        </div>
+      </div>
+
+      <!-- Settings Panel -->
+      <div id="panel-settings" class="sidebar-panel hidden">
+        <div class="settings-list">
+          <div class="setting-item">
+            <label>Font Size</label>
+            <input type="number" id="settingFontSize" value="13" min="10" max="24" />
+          </div>
+          <div class="setting-item">
+            <label>Tab Size</label>
+            <select id="settingTabSize">
+              <option value="2">2</option>
+              <option value="4" selected>4</option>
+              <option value="8">8</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label>Word Wrap</label>
+            <input type="checkbox" id="settingWordWrap" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Editor + Preview -->
+    <div class="workspace">
+
+      <!-- Editor Panel -->
+      <div class="editor-panel">
+        <!-- Tabs -->
+        <div class="tabs" id="tabBar"></div>
+
+        <!-- Code Area -->
+        <div class="code-area" id="codeArea">
+          <div class="line-numbers" id="lineNumbers"></div>
+          <textarea
+            id="codeEditor"
+            class="code-editor"
+            spellcheck="false"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+          ></textarea>
+        </div>
+
+        <!-- Notification toast -->
+        <div id="toast" class="toast hidden"></div>
+      </div>
+
+      <!-- Resize Handle -->
+      <div class="resize-handle" id="resizeHandle"></div>
+
+      <!-- Preview Panel -->
+      <div class="preview-panel" id="previewPanel">
+        <div class="preview-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          <span id="previewTitle">Preview: index.php</span>
+          <div class="preview-actions">
+            <svg id="refreshPreview" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2" title="Refresh" style="cursor:pointer"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            <svg id="openExternal" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2" title="Open in new tab" style="cursor:pointer"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          </div>
+        </div>
+        <iframe id="previewFrame" class="preview-frame"></iframe>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="statusbar">
+    <div class="status-left">
+      <span class="status-branch">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+        main*
+      </span>
+      <span class="status-sync">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        0
+      </span>
+    </div>
+    <div class="status-right">
+      <span id="cursorPos">Ln 1, Col 1</span>
+      <span id="spacesInfo">Spaces: 4</span>
+      <span>UTF-8</span>
+      <span class="php-status">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+        PHP 8.2
+      </span>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
