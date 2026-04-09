@@ -67,14 +67,14 @@ const STARTER_FILES = {
 // Welcome to Browser IDE
 echo "<h1>Hello from PHP " . PHP_VERSION . "!</h1>";
 echo "<p>Edit this file and click <strong>Run</strong> to see your output.</p>";
-`,
+?>`,
   'functions.php': `<?php
 // Helper functions
 
 function greet(string $name): string {
     return "Hello, " . htmlspecialchars($name) . "!";
 }
-`,
+?>`,
 };
 
 export async function createSession(sessionId) {

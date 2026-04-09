@@ -232,11 +232,14 @@ function setupResizeHandle() {
   const resizeHandle = document.getElementById('resizeHandle');
   const previewPanel = document.getElementById('previewPanel');
 
-  resizeHandle.addEventListener('mousedown', () => {
+  resizeHandle.addEventListener('mousedown', e => {
     if (window.innerWidth <= 760) return;
+    e.preventDefault();
     isResizing = true;
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
+    // Disable pointer events on the iframe so it doesn't swallow mousemove/mouseup
+    previewFrame.style.pointerEvents = 'none';
   });
 
   document.addEventListener('mousemove', e => {
@@ -247,11 +250,17 @@ function setupResizeHandle() {
     if (newWidth > 220 && newWidth < rect.width - 260) previewPanel.style.width = `${newWidth}px`;
   });
 
-  document.addEventListener('mouseup', () => {
+  const stopResize = () => {
+    if (!isResizing) return;
     isResizing = false;
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-  });
+    previewFrame.style.pointerEvents = '';
+  };
+
+  document.addEventListener('mouseup', stopResize);
+  // Catch the case where the mouse is released outside the window
+  document.addEventListener('mouseleave', stopResize);
 }
 
 function setupSearchHandlers() {
