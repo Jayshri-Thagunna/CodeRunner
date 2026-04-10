@@ -11,18 +11,15 @@ import runRouter from './routes/run.js';
 
 const app = express();
 
-// ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors({ origin: config.corsOrigin, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use(generalLimiter);
 
-// Request logging
 app.use((req, _res, next) => {
   logger.debug(`${req.method} ${req.path}`);
   next();
 });
 
-// ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/files', filesRouter);
 app.use('/api/run', runRouter);

@@ -127,7 +127,6 @@ export async function listSessionsForUser(userId) {
         sessions.push({ sessionId: entry.name, name: meta.name, createdAt: meta.createdAt });
       }
     } catch {
-      // session has no meta — skip
     }
   }
   return sessions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -190,7 +189,6 @@ export async function writeFile(sessionId, filename, content, overwrite = false)
     throw new AppError('Workspace size limit exceeded', 413, 'WORKSPACE_TOO_LARGE');
   }
 
-  // Check file count
   if (!exists) {
     const files = await fs.readdir(dir);
     if (files.length >= config.maxFilesPerSession) {

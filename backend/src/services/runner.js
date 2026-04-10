@@ -3,27 +3,16 @@ import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { ensureSessionExists, validateFilename } from './workspace.js';
 
-/**
- * Run a PHP file inside an ephemeral Docker container.
- *
- * When WORKSPACE_VOLUME is set (Docker-in-Docker / sibling-container setup)
- * the volume mount uses  <volumeName>/<sessionId>  so the host Docker daemon
- * can resolve it.  Otherwise the absolute host path is used (local dev).
- */
 export async function runPhp(sessionId, entryFile = 'index.php') {
   validateFilename(entryFile);
   const workspaceDir = await ensureSessionExists(sessionId);
 
-  // Build the volume mount for the PHP container.
-  // When WORKSPACE_VOLUME is set (running inside Docker), we mount the entire
-  // named volume and point the working dir at the session subdirectory inside it.
-  // This avoids passing a container-internal path to the host Docker daemon.
   const volumeMount = config.workspaceVolume
-    ? `${config.workspaceVolume}:/workspaces`          // full named volume
-    : `${workspaceDir}:/workspace`;                    // host path (local dev)
+    ? `${config.workspaceVolume}:/workspaces`          
+    : `${workspaceDir}:/workspace`;                    
 
   const workingDir = config.workspaceVolume
-    ? `/workspaces/${sessionId}`                       // subdir inside the volume
+    ? `/workspaces/${sessionId}`                       
     : '/workspace';
 
   const startMs = Date.now();
@@ -35,7 +24,7 @@ export async function runPhp(sessionId, entryFile = 'index.php') {
     '--cap-drop=ALL',
     '--security-opt=no-new-privileges',
     `--memory=${config.containerMemory}`,
-    `--memory-swap=${config.containerMemory}`, // disable swap
+    `--memory-swap=${config.containerMemory}`,
     `--cpus=${config.containerCpus}`,
     `--pids-limit=${config.containerPids}`,
     '--read-only',
@@ -63,7 +52,6 @@ export async function runPhp(sessionId, entryFile = 'index.php') {
       timedOut = true;
       logger.warn('PHP execution timed out, killing container', { sessionId });
       proc.kill('SIGKILL');
-      // Also force-remove the container in case kill doesn't propagate
       spawn('docker', ['kill', '--signal=SIGKILL', ...getContainerIds(proc)], { stdio: 'ignore' });
     }, config.execTimeoutMs);
 
@@ -107,8 +95,6 @@ export async function runPhp(sessionId, entryFile = 'index.php') {
   });
 }
 
-// docker run doesn't give us the container name easily via spawn,
-// so this is a no-op helper — the --rm flag handles cleanup on normal exit.
 function getContainerIds(_proc) {
   return [];
 }
