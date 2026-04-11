@@ -1,496 +1,723 @@
-// ── File Store ──────────────────────────────────────────────────────────────
-const files = {
-  'index.php': `<?php
+// ── API ──────────────────────────────────────────────────────────────────────
+const API = 'http://localhost:3001';
 
-  // Welcome to PHP CodeLab
-
-  $greeting = "Hello World" ;
-
-  $time = date ( 'H:i:s' );
-
-?>
-
-
-<!DOCTYPE html>
-
-  <html lang = "en" >
-
-    <head>
-
-      <style>
-
-        body {
-
-          background-color : #8f172a ;
-
-          color : #f8fafc ;
-
-        }
-
-      </style>
-
-    </head>
-
-    <body>
-
-      <h1> <?php echo $greeting ; ?> </h1>
-
-      <p> Current server time: <?php echo $time ; ?> </p>
-
-    </body>
-
-  </html>`,
-
-  'styles.css': `/* PHP CodeLab - Main Styles */
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: #0d0d0d;
-  color: #ccc;
-  margin: 0;
-  padding: 0;
+async function apiFetch(path, options = {}) {
+  const res = await fetch(`${API}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...options.headers },
+    ...options,
+  });
+  return res;
 }
 
-.container {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 2rem;
-}
+// ── File Store (in-memory cache; source of truth is the backend) ─────────────
+const files = {}; // name → content string | null (null = not yet loaded)
 
-h1 {
-  color: #22c55e;
-  font-size: 2rem;
-}
+// ── State ───────────────────────────────────────────────────────────────────
+let userId    = localStorage.getItem('ide_user_id') || (() => {
+  const id = typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+  localStorage.setItem('ide_user_id', id);
+  return id;
+})();
+let sessionId = null;
+let sessionName = 'Untitled project';
+let openTabs = [];
+let activeFile = null;
+let autoRunTimeout = null;
+let previewObjectUrl = null;
+let editor = null;
+let isResizing = false;
+let isSwitchingModel = false;
+const unsaved = new Set();
+const models = new Map();
 
-p {
-  color: #aaa;
-  line-height: 1.6;
-}`,
+// ── DOM refs ────────────────────────────────────────────────────────────────
+const tabBar        = document.getElementById('tabBar');
+const fileTree      = document.getElementById('fileTree');
+const previewFrame  = document.getElementById('previewFrame');
+const previewTitle  = document.getElementById('previewTitle');
+const cursorPos     = document.getElementById('cursorPos');
+const spacesInfo    = document.getElementById('spacesInfo');
+const runBtn        = document.getElementById('runBtn');
+const runBtnText    = document.getElementById('runBtnText');
+const toast         = document.getElementById('toast');
+const gitChanges    = document.getElementById('gitChanges');
+const gitStatus     = document.getElementById('gitStatus');
+const tabSizeSetting  = document.getElementById('settingTabSize');
+const fontSizeSetting = document.getElementById('settingFontSize');
+const wordWrapSetting = document.getElementById('settingWordWrap');
 
-  'config.json': `{
-  "name": "php-codelab-project",
-  "version": "1.0.0",
-  "php": "8.2",
-  "entry": "index.php",
-  "env": {
-    "APP_ENV": "development",
-    "APP_DEBUG": true,
-    "APP_URL": "http://localhost:8080"
-  },
-  "dependencies": {
-    "php-parser": "^4.0",
-    "monolog": "^3.0"
+// ── Monaco setup ─────────────────────────────────────────────────────────────
+window.MonacoEnvironment = {
+  getWorkerUrl() {
+    const source = `
+      self.MonacoEnvironment = { baseUrl: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/' };
+      importScripts('https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/base/worker/workerMain.js');
+    `;
+    return `data:text/javascript;charset=utf-8,${encodeURIComponent(source)}`;
   }
-}`
 };
 
-// ── State ────────────────────────────────────────────────────────────────────
-let openTabs = ['index.php', 'styles.css'];
-let activeFile = 'index.php';
-let unsaved = new Set();
-let autoRunTimeout = null;
+window.require.config({
+  paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs' }
+});
 
-// ── DOM refs ─────────────────────────────────────────────────────────────────
-const tabBar       = document.getElementById('tabBar');
-const codeEditor   = document.getElementById('codeEditor');
-const lineNumbers  = document.getElementById('lineNumbers');
-const previewFrame = document.getElementById('previewFrame');
-const previewTitle = document.getElementById('previewTitle');
-const cursorPos    = document.getElementById('cursorPos');
-const spacesInfo   = document.getElementById('spacesInfo');
-const runBtn       = document.getElementById('runBtn');
-const runBtnText   = document.getElementById('runBtnText');
-const toast        = document.getElementById('toast');
-const gitChanges   = document.getElementById('gitChanges');
+window.require(['vs/editor/editor.main'], async () => {
+  initMonaco();
+  bindUiEvents();
+  spacesInfo.textContent = `Spaces: ${tabSizeSetting.value}`;
+  await initSession();
+});
 
-// ── Tab Management ────────────────────────────────────────────────────────────
+// ── Session bootstrap ─────────────────────────────────────────────────────────
+async function initSession() {
+  try {
+    const stored = localStorage.getItem('ide_session_id');
+
+    if (stored) {
+      const check = await apiFetch(`/api/files?sessionId=${stored}`);
+      if (check.ok) {
+        sessionId = stored;
+        const { files: remoteFiles } = await check.json();
+        for (const f of remoteFiles) files[f.name] = null;
+      }
+    }
+
+    if (!sessionId) {
+      const res = await apiFetch('/api/sessions', { method: 'POST', body: JSON.stringify({ userId }) });
+      if (!res.ok) throw new Error('Failed to create session');
+      const data = await res.json();
+      sessionId = data.sessionId;
+      sessionName = data.name;
+      localStorage.setItem('ide_session_id', sessionId);
+      for (const f of data.files) files[f.name] = null;
+    }
+
+    await Promise.all(Object.keys(files).map(loadFileContent));
+    openTabs = Object.keys(files).slice(0, 2);
+    activeFile = openTabs[0] || null;
+
+    renderFileTree();
+    renderTabs();
+    updateSessionLabel();
+    if (activeFile) switchFile(activeFile);
+    updateGitBadge();
+    await renderSessionList();
+  } catch (err) {
+    console.error('Session init failed:', err);
+    showToast('Cannot reach backend — is the API server running on port 3001?');
+  }
+}
+
+// Load a different session (switch context entirely)
+async function loadSession(id) {
+  // Clear in-memory state
+  for (const key of Object.keys(files)) delete files[key];
+  for (const [, model] of models) model.dispose();
+  models.clear();
+  unsaved.clear();
+  openTabs = [];
+  activeFile = null;
+  editor.setModel(null);
+  previewFrame.removeAttribute('srcdoc');
+  previewFrame.removeAttribute('src');
+
+  const res = await apiFetch(`/api/files?sessionId=${id}`);
+  if (!res.ok) { showToast('Could not load session'); return; }
+  const { files: remoteFiles } = await res.json();
+  for (const f of remoteFiles) files[f.name] = null;
+
+  sessionId = id;
+  localStorage.setItem('ide_session_id', id);
+  await Promise.all(Object.keys(files).map(loadFileContent));
+
+  openTabs = Object.keys(files).slice(0, 2);
+  activeFile = openTabs[0] || null;
+
+  renderFileTree();
+  renderTabs();
+  updateGitBadge();
+  if (activeFile) switchFile(activeFile);
+  await renderSessionList();
+  showToast('Switched session');
+}
+
+async function createNewSession(name = '') {
+  const label = name || window.prompt('Session name:', 'New project');
+  if (!label) return;
+  const res = await apiFetch('/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ userId, name: label.trim() }),
+  });
+  if (!res.ok) { showToast('Could not create session'); return; }
+  const data = await res.json();
+  sessionName = data.name;
+  await loadSession(data.sessionId);
+}
+
+async function renderSessionList() {
+  const container = document.getElementById('sessionList');
+  if (!container) return;
+  const res = await apiFetch(`/api/sessions?userId=${userId}`);
+  if (!res.ok) { container.innerHTML = '<div class="sr-empty">Could not load sessions</div>'; return; }
+  const { sessions } = await res.json();
+
+  container.innerHTML = sessions.map(s => `
+    <div class="session-item${s.sessionId === sessionId ? ' active' : ''}" data-id="${s.sessionId}">
+      <span class="session-name" data-id="${s.sessionId}">${escapeHtml(s.name)}</span>
+      <span class="session-rename" data-id="${s.sessionId}" title="Rename">✎</span>
+    </div>`).join('') || '<div class="sr-empty">No sessions yet</div>';
+
+  container.querySelectorAll('.session-item').forEach(el => {
+    el.addEventListener('click', e => {
+      if (e.target.classList.contains('session-rename')) return;
+      const id = el.dataset.id;
+      if (id !== sessionId) loadSession(id);
+    });
+  });
+
+  container.querySelectorAll('.session-rename').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const current = container.querySelector(`.session-name[data-id="${id}"]`).textContent;
+      const newName = window.prompt('Rename session:', current);
+      if (!newName || !newName.trim()) return;
+      const res = await apiFetch(`/api/sessions/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: newName.trim() }),
+      });
+      if (res.ok) {
+        if (id === sessionId) { sessionName = newName.trim(); updateSessionLabel(); }
+        await renderSessionList();
+      }
+    });
+  });
+}
+
+function updateSessionLabel() {
+  const el = document.querySelector('.tree-folder span');
+  if (el) el.textContent = sessionName.toUpperCase();
+}
+
+async function loadFileContent(name) {
+  if (files[name] !== null) return;
+  try {
+    const res = await apiFetch(`/api/files/${encodeURIComponent(name)}?sessionId=${sessionId}`);
+    if (res.ok) {
+      const { content } = await res.json();
+      files[name] = content;
+      if (models.has(name)) {
+        const m = models.get(name);
+        if (m.getValue() !== content) m.setValue(content);
+      }
+    }
+  } catch (err) {
+    console.error(`Failed to load ${name}:`, err);
+  }
+}
+
+// ── Monaco init ───────────────────────────────────────────────────────────────
+function initMonaco() {
+  monaco.editor.defineTheme('codelab-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [],
+    colors: {
+      'editor.background': '#0d0d0d',
+      'editor.lineHighlightBackground': '#141414',
+      'editorCursor.foreground': '#f9fafb',
+      'editorLineNumber.foreground': '#3a3a3a',
+      'editorLineNumber.activeForeground': '#8a8a8a'
+    }
+  });
+
+  editor = monaco.editor.create(document.getElementById('monacoEditor'), {
+    theme: 'codelab-dark',
+    fontFamily: "'Fira Code', 'Cascadia Code', Consolas, monospace",
+    fontLigatures: true,
+    fontSize: parseInt(fontSizeSetting.value, 10) || 13,
+    lineHeight: 21,
+    minimap: { enabled: false },
+    automaticLayout: true,
+    smoothScrolling: true,
+    scrollBeyondLastLine: false,
+    tabSize: parseInt(tabSizeSetting.value, 10) || 4,
+    insertSpaces: true,
+    wordWrap: wordWrapSetting.checked ? 'on' : 'off'
+  });
+
+  editor.onDidChangeModelContent(() => {
+    if (isSwitchingModel || !activeFile) return;
+    const model = editor.getModel();
+    if (!model) return;
+    files[activeFile] = model.getValue();
+    markUnsaved(activeFile);
+    scheduleAutoRun();
+  });
+
+  editor.onDidChangeCursorPosition(() => updateCursorStatus());
+
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveFile());
+}
+
+// ── Models ────────────────────────────────────────────────────────────────────
+function ensureModel(name) {
+  if (models.has(name)) return models.get(name);
+  const uri = monaco.Uri.parse(`inmemory://model/${encodeURIComponent(name)}`);
+  const model = monaco.editor.createModel(files[name] ?? '', inferLanguage(name), uri);
+  model.updateOptions({ tabSize: parseInt(tabSizeSetting.value, 10) || 4, insertSpaces: true });
+  models.set(name, model);
+  return model;
+}
+
+function inferLanguage(name) {
+  if (name.endsWith('.php'))  return 'php';
+  if (name.endsWith('.css'))  return 'css';
+  if (name.endsWith('.js'))   return 'javascript';
+  if (name.endsWith('.json')) return 'json';
+  if (name.endsWith('.html')) return 'html';
+  if (name.endsWith('.md'))   return 'markdown';
+  return 'plaintext';
+}
+
+// ── UI Bindings ───────────────────────────────────────────────────────────────
+function bindUiEvents() {
+  document.getElementById('newFileBtn').addEventListener('click', createNewFile);
+  document.getElementById('newSessionBtn')?.addEventListener('click', () => createNewSession());
+
+  document.getElementById('folderToggle').addEventListener('click', () => {
+    const arrow = document.querySelector('.folder-arrow');
+    const collapsed = fileTree.style.display === 'none';
+    fileTree.style.display = collapsed ? '' : 'none';
+    arrow.style.transform = collapsed ? '' : 'rotate(-90deg)';
+  });
+
+  const panels = ['explorer', 'search', 'git', 'sessions', 'extensions', 'settings'];
+  document.querySelectorAll('.activity-icon[data-panel]').forEach(icon => {
+    icon.addEventListener('click', () => {
+      const panel = icon.dataset.panel;
+      document.querySelectorAll('.activity-icon').forEach(i => i.classList.remove('active'));
+      icon.classList.add('active');
+      panels.forEach(p => {
+        document.getElementById(`panel-${p}`).classList.toggle('hidden', p !== panel);
+      });
+      const titles = { explorer: 'EXPLORER', search: 'SEARCH', git: 'SOURCE CONTROL', sessions: 'SESSIONS', extensions: 'EXTENSIONS', settings: 'SETTINGS' };
+      document.getElementById('sidebarTitle').textContent = titles[panel] || panel.toUpperCase();
+      if (panel === 'sessions') renderSessionList();
+    });
+  });
+
+  runBtn.addEventListener('click', runCode);
+
+  document.getElementById('refreshPreview').addEventListener('click', () => {
+    updatePreview();
+    showToast('Preview refreshed');
+  });
+
+  document.getElementById('openExternal').addEventListener('click', () => {
+    const html = getPreviewHtml();
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    window.open(url, '_blank');
+  });
+
+  setupResizeHandle();
+  setupSearchHandlers();
+  setupSettingsHandlers();
+  setupTitleBarSearch();
+
+  window.addEventListener('resize', () => { if (editor) editor.layout(); });
+}
+
+function setupResizeHandle() {
+  const resizeHandle = document.getElementById('resizeHandle');
+  const previewPanel = document.getElementById('previewPanel');
+
+  resizeHandle.addEventListener('mousedown', e => {
+    if (window.innerWidth <= 760) return;
+    e.preventDefault();
+    isResizing = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    // Disable pointer events on the iframe so it doesn't swallow mousemove/mouseup
+    previewFrame.style.pointerEvents = 'none';
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!isResizing) return;
+    const workspace = document.querySelector('.workspace');
+    const rect = workspace.getBoundingClientRect();
+    const newWidth = rect.right - e.clientX;
+    if (newWidth > 220 && newWidth < rect.width - 260) previewPanel.style.width = `${newWidth}px`;
+  });
+
+  const stopResize = () => {
+    if (!isResizing) return;
+    isResizing = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    previewFrame.style.pointerEvents = '';
+  };
+
+  document.addEventListener('mouseup', stopResize);
+  // Catch the case where the mouse is released outside the window
+  document.addEventListener('mouseleave', stopResize);
+}
+
+function setupSearchHandlers() {
+  const sidebarSearch = document.getElementById('sidebarSearch');
+  const searchResults = document.getElementById('searchResults');
+
+  sidebarSearch.addEventListener('input', () => {
+    const query = sidebarSearch.value.trim();
+    if (!query) { searchResults.innerHTML = ''; return; }
+
+    const normalizedQuery = query.toLowerCase();
+    const markPattern = new RegExp(escapeRegExp(query), 'gi');
+    let html = '';
+
+    Object.entries(files).forEach(([name, content]) => {
+      if (!content) return;
+      content.split('\n').forEach((line, i) => {
+        if (!line.toLowerCase().includes(normalizedQuery)) return;
+        const safeLine = escapeHtml(line).replace(markPattern, match => `<mark>${match}</mark>`);
+        html += `
+          <div class="search-result" data-file="${name}" data-line="${i + 1}">
+            <span class="sr-file">${name}:${i + 1}</span>
+            <span class="sr-line">${safeLine}</span>
+          </div>`;
+      });
+    });
+
+    searchResults.innerHTML = html || '<div class="sr-empty">No results</div>';
+    searchResults.querySelectorAll('.search-result').forEach(el => {
+      el.addEventListener('click', () => {
+        const targetLine = parseInt(el.dataset.line, 10);
+        switchFile(el.dataset.file);
+        editor.revealLineInCenter(targetLine);
+        editor.setPosition({ lineNumber: targetLine, column: 1 });
+        editor.focus();
+      });
+    });
+  });
+}
+
+function setupTitleBarSearch() {
+  const searchInput  = document.getElementById('searchInput');
+  const sidebarSearch = document.getElementById('sidebarSearch');
+
+  searchInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { searchInput.value = ''; return; }
+    if (e.key !== 'Enter') return;
+    const value = searchInput.value.trim();
+    if (!value) return;
+
+    document.querySelectorAll('.activity-icon').forEach(i => i.classList.remove('active'));
+    document.querySelector('.activity-icon[data-panel="search"]')?.classList.add('active');
+    ['explorer', 'search', 'git', 'extensions', 'settings'].forEach(p => {
+      document.getElementById(`panel-${p}`).classList.toggle('hidden', p !== 'search');
+    });
+    document.getElementById('sidebarTitle').textContent = 'SEARCH';
+    sidebarSearch.value = value;
+    sidebarSearch.dispatchEvent(new Event('input'));
+  });
+}
+
+function setupSettingsHandlers() {
+  fontSizeSetting.addEventListener('input', () => {
+    const size = parseInt(fontSizeSetting.value, 10);
+    if (Number.isNaN(size) || size < 10 || size > 24 || !editor) return;
+    editor.updateOptions({ fontSize: size, lineHeight: Math.round(size * 1.6) });
+  });
+
+  tabSizeSetting.addEventListener('change', () => {
+    const tabSize = parseInt(tabSizeSetting.value, 10) || 4;
+    spacesInfo.textContent = `Spaces: ${tabSize}`;
+    models.forEach(m => m.updateOptions({ tabSize, insertSpaces: true }));
+  });
+
+  wordWrapSetting.addEventListener('change', () => {
+    if (!editor) return;
+    editor.updateOptions({ wordWrap: wordWrapSetting.checked ? 'on' : 'off' });
+  });
+}
+
+// ── Tabs and file tree ────────────────────────────────────────────────────────
 function renderTabs() {
   tabBar.innerHTML = '';
   openTabs.forEach(name => {
     const tab = document.createElement('div');
-    tab.className = 'tab' + (name === activeFile ? ' active' : '');
+    tab.className = `tab${name === activeFile ? ' active' : ''}`;
     tab.dataset.file = name;
-
-    const icon = getFileIcon(name);
-    const dot  = unsaved.has(name) ? '<span class="unsaved-dot">●</span>' : '';
-
-    tab.innerHTML = `
-      ${icon}
-      <span>${name}</span>
-      ${dot}
-      <span class="tab-close" data-file="${name}">×</span>
-    `;
-
-    tab.addEventListener('click', (e) => {
-      if (e.target.classList.contains('tab-close')) return;
-      switchFile(name);
-    });
-
-    tab.querySelector('.tab-close').addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeTab(name);
-    });
-
+    const dot = unsaved.has(name) ? '<span class="unsaved-dot">●</span>' : '';
+    tab.innerHTML = `${getFileIcon(name)}<span>${name}</span>${dot}<span class="tab-close" data-file="${name}">×</span>`;
+    tab.addEventListener('click', e => { if (!e.target.classList.contains('tab-close')) switchFile(name); });
+    tab.querySelector('.tab-close').addEventListener('click', e => { e.stopPropagation(); closeTab(name); });
     tabBar.appendChild(tab);
   });
 }
 
-function getFileIcon(name) {
-  if (name.endsWith('.php'))  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-  if (name.endsWith('.css'))  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-  if (name.endsWith('.json')) return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fb923c" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+function renderFileTree() {
+  const sorted = Object.keys(files).sort((a, b) => a.localeCompare(b));
+  fileTree.innerHTML = sorted.map(name => `
+    <div class="tree-item${name === activeFile ? ' active' : ''}" data-file="${name}">
+      ${getFileIcon(name, true)}<span>${name}</span>
+    </div>`).join('');
+
+  fileTree.querySelectorAll('.tree-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const name = item.dataset.file;
+      if (!openTabs.includes(name)) openTabs.push(name);
+      switchFile(name);
+    });
+  });
 }
 
-function switchFile(name) {
-  if (!files[name]) return;
-  // save current content
-  files[activeFile] = codeEditor.value;
-  activeFile = name;
+async function switchFile(name) {
+  if (!(name in files) || !editor) return;
   if (!openTabs.includes(name)) openTabs.push(name);
-  codeEditor.value = files[name];
-  updateLineNumbers();
+
+  // Lazy-load content if not yet fetched
+  if (files[name] === null) await loadFileContent(name);
+
+  activeFile = name;
+  isSwitchingModel = true;
+  editor.setModel(ensureModel(name));
+  isSwitchingModel = false;
+
   renderTabs();
   highlightSidebarItem(name);
   previewTitle.textContent = `Preview: ${name}`;
-  updatePreview();
-  codeEditor.focus();
+  updateCursorStatus();
+  scheduleAutoRun(true);
+  editor.focus();
 }
 
 function closeTab(name) {
   const idx = openTabs.indexOf(name);
+  if (idx === -1) return;
   openTabs = openTabs.filter(t => t !== name);
-  unsaved.delete(name);
+
   if (activeFile === name) {
-    activeFile = openTabs[Math.max(0, idx - 1)] || openTabs[0] || null;
-    if (activeFile) {
-      codeEditor.value = files[activeFile];
-      updateLineNumbers();
-      updatePreview();
+    const next = openTabs[idx - 1] || openTabs[0] || null;
+    if (next) {
+      switchFile(next);
     } else {
-      codeEditor.value = '';
-      lineNumbers.innerHTML = '';
+      activeFile = null;
+      editor.setModel(null);
+      previewTitle.textContent = 'Preview';
+      if (previewObjectUrl) { URL.revokeObjectURL(previewObjectUrl); previewObjectUrl = null; }
+      previewFrame.removeAttribute('src');
     }
   }
+
+  renderTabs();
+  highlightSidebarItem(activeFile);
+}
+
+async function createNewFile() {
+  const input = window.prompt('Enter file name (for example: utils.php):');
+  if (!input) return;
+  const name = input.trim();
+  if (!name) return;
+
+  if (/[\\/]/.test(name)) { showToast('Use a single filename without folder separators'); return; }
+  if (name in files) { showToast('A file with that name already exists'); return; }
+
+  const content = starterContentFor(name);
+
+  try {
+    const res = await apiFetch('/api/files', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId, filename: name, content }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(`Could not create file: ${err.error || res.status}`);
+      return;
+    }
+  } catch {
+    showToast('Create failed — backend unreachable');
+    return;
+  }
+
+  files[name] = content;
+  ensureModel(name);
+  if (!openTabs.includes(name)) openTabs.push(name);
+  markUnsaved(name);
+  renderFileTree();
+  switchFile(name);
+  showToast(`+ Created ${name}`);
+}
+
+function markUnsaved(name) {
+  if (!name) return;
+  unsaved.add(name);
+  updateGitBadge();
   renderTabs();
 }
 
-// ── Sidebar File Tree ─────────────────────────────────────────────────────────
-document.querySelectorAll('.tree-item[data-file]').forEach(item => {
-  item.addEventListener('click', () => {
-    const name = item.dataset.file;
-    if (name === 'assets') return;
-    if (!openTabs.includes(name)) openTabs.push(name);
-    switchFile(name);
-  });
-});
+function updateGitBadge() {
+  gitChanges.textContent = String(unsaved.size);
+  if (unsaved.size > 0) {
+    gitStatus.textContent = 'Dirty';
+    gitStatus.classList.remove('green');
+  } else {
+    gitStatus.textContent = 'Clean';
+    gitStatus.classList.add('green');
+  }
+}
 
 function highlightSidebarItem(name) {
-  document.querySelectorAll('.tree-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.file === name);
+  fileTree.querySelectorAll('.tree-item').forEach(item => {
+    item.classList.toggle('active', item.dataset.file === name);
   });
-}
-
-// Folder toggle
-document.getElementById('folderToggle').addEventListener('click', () => {
-  const tree = document.getElementById('fileTree');
-  const arrow = document.querySelector('.folder-arrow');
-  const collapsed = tree.style.display === 'none';
-  tree.style.display = collapsed ? '' : 'none';
-  arrow.style.transform = collapsed ? '' : 'rotate(-90deg)';
-});
-
-// ── Activity Bar ──────────────────────────────────────────────────────────────
-const panels = ['explorer','search','git','extensions','settings'];
-document.querySelectorAll('.activity-icon[data-panel]').forEach(icon => {
-  icon.addEventListener('click', () => {
-    const panel = icon.dataset.panel;
-    document.querySelectorAll('.activity-icon').forEach(i => i.classList.remove('active'));
-    icon.classList.add('active');
-    panels.forEach(p => {
-      document.getElementById(`panel-${p}`).classList.toggle('hidden', p !== panel);
-    });
-    const titles = { explorer:'EXPLORER', search:'SEARCH', git:'SOURCE CONTROL', extensions:'EXTENSIONS', settings:'SETTINGS' };
-    document.getElementById('sidebarTitle').textContent = titles[panel] || panel.toUpperCase();
-  });
-});
-
-// ── Code Editor ───────────────────────────────────────────────────────────────
-codeEditor.addEventListener('input', () => {
-  files[activeFile] = codeEditor.value;
-  unsaved.add(activeFile);
-  gitChanges.textContent = unsaved.size;
-  updateLineNumbers();
-  renderTabs();
-  scheduleAutoRun();
-});
-
-codeEditor.addEventListener('keydown', (e) => {
-  // Tab key → insert spaces
-  if (e.key === 'Tab') {
-    e.preventDefault();
-    const tabSize = parseInt(document.getElementById('settingTabSize')?.value || 4);
-    const spaces = ' '.repeat(tabSize);
-    const start = codeEditor.selectionStart;
-    const end   = codeEditor.selectionEnd;
-    codeEditor.value = codeEditor.value.substring(0, start) + spaces + codeEditor.value.substring(end);
-    codeEditor.selectionStart = codeEditor.selectionEnd = start + spaces.length;
-    files[activeFile] = codeEditor.value;
-    updateLineNumbers();
-    scheduleAutoRun();
-  }
-  // Ctrl+S → save
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-    e.preventDefault();
-    saveFile();
-  }
-  // Ctrl+Z handled natively
-});
-
-codeEditor.addEventListener('keyup', updateCursor);
-codeEditor.addEventListener('click', updateCursor);
-codeEditor.addEventListener('scroll', syncScroll);
-
-function syncScroll() {
-  lineNumbers.scrollTop = codeEditor.scrollTop;
-}
-
-function updateCursor() {
-  const val = codeEditor.value;
-  const pos = codeEditor.selectionStart;
-  const lines = val.substring(0, pos).split('\n');
-  const ln = lines.length;
-  const col = lines[lines.length - 1].length + 1;
-  cursorPos.textContent = `Ln ${ln}, Col ${col}`;
-}
-
-function updateLineNumbers() {
-  const count = (codeEditor.value.match(/\n/g) || []).length + 1;
-  lineNumbers.innerHTML = Array.from({ length: count }, (_, i) =>
-    `<span>${i + 1}</span>`
-  ).join('');
-  lineNumbers.scrollTop = codeEditor.scrollTop;
 }
 
 // ── Save ──────────────────────────────────────────────────────────────────────
-function saveFile() {
-  files[activeFile] = codeEditor.value;
-  unsaved.delete(activeFile);
-  gitChanges.textContent = unsaved.size;
-  renderTabs();
-  showToast(`✓ Saved ${activeFile}`);
-  updatePreview();
-}
+async function saveFile() {
+  if (!activeFile || !editor.getModel()) return;
+  const content = editor.getModel().getValue();
+  files[activeFile] = content;
 
-// ── Auto-run ──────────────────────────────────────────────────────────────────
-function scheduleAutoRun() {
-  clearTimeout(autoRunTimeout);
-  autoRunTimeout = setTimeout(updatePreview, 800);
-}
-
-// ── Preview ───────────────────────────────────────────────────────────────────
-function updatePreview() {
-  const php = files['index.php'] || '';
-  const css = files['styles.css'] || '';
-
-  // Simulate PHP: replace <?php ... ?> blocks with JS-evaluated output
-  let html = simulatePHP(php, css);
-
-  const blob = new Blob([html], { type: 'text/html' });
-  const url  = URL.createObjectURL(blob);
-  previewFrame.src = url;
-}
-
-function simulatePHP(src, extraCss) {
-  const now = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-
-  // Extract variables from PHP block
-  const vars = {};
-  const phpBlock = src.match(/<\?php([\s\S]*?)\?>/);
-  if (phpBlock) {
-    const code = phpBlock[1];
-    // $var = "value" or $var = 'value'
-    const strMatches = [...code.matchAll(/\$(\w+)\s*=\s*["']([^"']+)["']/g)];
-    strMatches.forEach(m => vars[m[1]] = m[2]);
-    // $time = date(...)
-    if (/\$(\w+)\s*=\s*date\s*\(/.test(code)) {
-      const m = code.match(/\$(\w+)\s*=\s*date\s*\(/);
-      if (m) vars[m[1]] = timeStr;
+  try {
+    const res = await apiFetch(`/api/files/${encodeURIComponent(activeFile)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ sessionId, content }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(`Save failed: ${err.error || res.status}`);
+      return;
     }
+  } catch {
+    showToast('Save failed — backend unreachable');
+    return;
   }
 
-  // Remove PHP blocks, then replace echo statements
-  let html = src.replace(/<\?php[\s\S]*?\?>/g, '');
-
-  // Replace <?php echo $var ; ?> inline
-  html = html.replace(/<\?php\s+echo\s+\$(\w+)\s*;?\s*\?>/g, (_, name) => vars[name] || '');
-
-  // Inject extra CSS if not already in the HTML
-  if (extraCss && !html.includes('<link') && !html.includes(extraCss.substring(0, 20))) {
-    html = html.replace('</head>', `<style>${extraCss}</style></head>`);
-  }
-
-  // Inject live clock script into preview
-  html = html.replace('</body>', `
-    <script>
-      (function() {
-        function tick() {
-          var els = document.querySelectorAll('[data-clock]');
-          var now = new Date();
-          var t = [now.getHours(), now.getMinutes(), now.getSeconds()]
-            .map(function(n){ return String(n).padStart(2,'0'); }).join(':');
-          els.forEach(function(el){ el.textContent = t; });
-        }
-        tick();
-        setInterval(tick, 1000);
-      })();
-    <\/script>
-  </body>`);
-
-  return html;
+  unsaved.delete(activeFile);
+  updateGitBadge();
+  renderTabs();
+  showToast(`Saved ${activeFile}`);
 }
 
-// ── Run Button ────────────────────────────────────────────────────────────────
-runBtn.addEventListener('click', () => {
+// ── Run ───────────────────────────────────────────────────────────────────────
+async function runCode() {
+  if (!sessionId) { showToast('No active session'); return; }
+
+  await saveFile();
+
   runBtnText.textContent = 'Running...';
   runBtn.disabled = true;
   runBtn.style.background = '#16a34a';
-  setTimeout(() => {
-    saveFile();
-    updatePreview();
+
+  try {
+    const res = await apiFetch('/api/run', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId, entryFile: activeFile || 'index.php' }),
+    });
+
+    if (res.status === 429) { showToast('Rate limited — slow down a bit'); return; }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(`Run error: ${err.error || res.status}`);
+      return;
+    }
+
+    const result = await res.json();
+    previewFrame.srcdoc = result.html || '';
+
+    if (result.timedOut) {
+      showToast('Execution timed out after 5s');
+    } else if (result.stderr) {
+      showToast(result.stderr.split('\n')[0]);
+    } else {
+      showToast('Executed successfully');
+    }
+  } catch {
+    showToast('Run failed — backend unreachable');
+  } finally {
     runBtnText.textContent = 'Run Code';
     runBtn.disabled = false;
     runBtn.style.background = '';
-    showToast('▶ Code executed successfully');
-  }, 600);
-});
+  }
+}
 
-// ── Refresh / Open External ───────────────────────────────────────────────────
-document.getElementById('refreshPreview').addEventListener('click', () => {
-  updatePreview();
-  showToast('Preview refreshed');
-});
+// ── Auto-preview (non-PHP only) ───────────────────────────────────────────────
+function scheduleAutoRun(immediate = false) {
+  // PHP requires the Run button — only auto-preview HTML/CSS locally
+  if (activeFile && activeFile.endsWith('.php')) return;
+  clearTimeout(autoRunTimeout);
+  if (immediate) { updatePreview(); return; }
+  autoRunTimeout = setTimeout(updatePreview, 500);
+}
 
-document.getElementById('openExternal').addEventListener('click', () => {
-  const php = files['index.php'] || '';
+// ── Preview (local, for HTML/CSS) ─────────────────────────────────────────────
+function updatePreview() {
+  const html = getPreviewHtml();
+  if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+  previewObjectUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+  previewFrame.src = previewObjectUrl;
+}
+
+function getPreviewHtml() {
   const css = files['styles.css'] || '';
-  const html = simulatePHP(php, css);
-  const blob = new Blob([html], { type: 'text/html' });
-  window.open(URL.createObjectURL(blob), '_blank');
-});
 
-// ── Resize Handle ─────────────────────────────────────────────────────────────
-const resizeHandle = document.getElementById('resizeHandle');
-const previewPanel = document.getElementById('previewPanel');
-let isResizing = false;
+  if (activeFile && activeFile.endsWith('.html')) return injectCssIntoHtml(files[activeFile] || '', css);
+  if (activeFile && activeFile.endsWith('.css') && files['index.html']) return injectCssIntoHtml(files['index.html'], files[activeFile]);
+  if (files['index.html']) return injectCssIntoHtml(files['index.html'], css);
 
-resizeHandle.addEventListener('mousedown', (e) => {
-  isResizing = true;
-  document.body.style.cursor = 'col-resize';
-  document.body.style.userSelect = 'none';
-});
-
-document.addEventListener('mousemove', (e) => {
-  if (!isResizing) return;
-  const workspace = document.querySelector('.workspace');
-  const rect = workspace.getBoundingClientRect();
-  const newWidth = rect.right - e.clientX;
-  if (newWidth > 180 && newWidth < rect.width - 200) {
-    previewPanel.style.width = newWidth + 'px';
-  }
-});
-
-document.addEventListener('mouseup', () => {
-  isResizing = false;
-  document.body.style.cursor = '';
-  document.body.style.userSelect = '';
-});
-
-// ── Search in Files ───────────────────────────────────────────────────────────
-document.getElementById('sidebarSearch').addEventListener('input', (e) => {
-  const q = e.target.value.trim().toLowerCase();
-  const results = document.getElementById('searchResults');
-  if (!q) { results.innerHTML = ''; return; }
-
-  let html = '';
-  Object.entries(files).forEach(([name, content]) => {
-    const lines = content.split('\n');
-    lines.forEach((line, i) => {
-      if (line.toLowerCase().includes(q)) {
-        const safe = line.replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        const highlighted = safe.replace(new RegExp(q, 'gi'), m => `<mark>${m}</mark>`);
-        html += `<div class="search-result" data-file="${name}" data-line="${i}">
-          <span class="sr-file">${name}:${i+1}</span>
-          <span class="sr-line">${highlighted}</span>
-        </div>`;
-      }
-    });
-  });
-
-  results.innerHTML = html || '<div class="sr-empty">No results</div>';
-  results.querySelectorAll('.search-result').forEach(el => {
-    el.addEventListener('click', () => {
-      switchFile(el.dataset.file);
-      // jump to line
-      const lineIdx = parseInt(el.dataset.line);
-      const lines = codeEditor.value.split('\n');
-      const charPos = lines.slice(0, lineIdx).join('\n').length + 1;
-      codeEditor.setSelectionRange(charPos, charPos + lines[lineIdx].length);
-      codeEditor.focus();
-    });
-  });
-});
-
-// ── Title bar search ──────────────────────────────────────────────────────────
-document.getElementById('searchInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') e.target.value = '';
-});
-
-// ── Settings ──────────────────────────────────────────────────────────────────
-document.getElementById('settingFontSize').addEventListener('input', (e) => {
-  const size = parseInt(e.target.value);
-  if (size >= 10 && size <= 24) {
-    codeEditor.style.fontSize = size + 'px';
-    document.getElementById('lineNumbers').style.fontSize = (size - 1) + 'px';
-  }
-});
-
-document.getElementById('settingTabSize').addEventListener('change', (e) => {
-  spacesInfo.textContent = `Spaces: ${e.target.value}`;
-});
-
-document.getElementById('settingWordWrap').addEventListener('change', (e) => {
-  codeEditor.style.whiteSpace = e.target.checked ? 'pre-wrap' : 'pre';
-  codeEditor.style.overflowX  = e.target.checked ? 'hidden' : 'auto';
-});
-
-// ── Live Clock in status bar ──────────────────────────────────────────────────
-function tickClock() {
-  const now = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  const t = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-  // update preview time if visible
-  updatePreview();
+  return `<!doctype html><html><body style="font-family:sans-serif;padding:1rem;background:#0d0d0d;color:#ccc">
+    <p>Click <strong>Run</strong> to execute PHP, or open an HTML file for live preview.</p>
+  </body></html>`;
 }
-setInterval(tickClock, 1000);
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
-function showToast(msg) {
-  toast.textContent = msg;
+function injectCssIntoHtml(html, css) {
+  if (!css) return html;
+  const tag = `<style>${css}</style>`;
+  return html.includes('</head>') ? html.replace('</head>', `${tag}</head>`) : `${tag}${html}`;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function updateCursorStatus() {
+  if (!editor) return;
+  const pos = editor.getPosition();
+  if (pos) cursorPos.textContent = `Ln ${pos.lineNumber}, Col ${pos.column}`;
+}
+
+function starterContentFor(name) {
+  if (name.endsWith('.php'))  return `<?php\n\n$greeting = "Hello";\n\necho "<h1>" . $greeting . "</h1>";\n`;
+  if (name.endsWith('.js'))   return `function main() {\n  console.log('Hello from ${name}');\n}\n\nmain();\n`;
+  if (name.endsWith('.css'))  return `/* ${name} */\n\n:root {\n  color-scheme: dark;\n}\n`;
+  if (name.endsWith('.html')) return `<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8" />\n  <title>${name}</title>\n</head>\n<body>\n  <h1>${name}</h1>\n</body>\n</html>\n`;
+  if (name.endsWith('.json')) return '{\n  "name": "value"\n}\n';
+  if (name.endsWith('.md'))   return `# ${name}\n\nStart writing...\n`;
+  return '';
+}
+
+function getFileIcon(name, compact = false) {
+  const size = compact ? 13 : 12;
+  const stroke = compact ? '1.8' : '2';
+  const colors = { '.php': '#60a5fa', '.css': '#a78bfa', '.js': '#facc15', '.json': '#fb923c' };
+  const ext = Object.keys(colors).find(e => name.endsWith(e));
+  const color = ext ? colors[ext] : '#9ca3af';
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="${stroke}"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+}
+
+function escapeRegExp(v) { return v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function escapeHtml(v) {
+  return v.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+
+function showToast(message) {
+  toast.textContent = message;
   toast.classList.remove('hidden');
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => toast.classList.add('hidden'), 2200);
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => toast.classList.add('hidden'), 2200);
 }
-
-// ── Init ──────────────────────────────────────────────────────────────────────
-function init() {
-  codeEditor.value = files[activeFile];
-  updateLineNumbers();
-  renderTabs();
-  updatePreview();
-  updateCursor();
-}
-
-init();

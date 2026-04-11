@@ -82,7 +82,7 @@ body {
 /* ── Sidebar ── */
 .sidebar {
   width: 200px; background: #111; border-right: 1px solid #222;
-  flex-shrink: 0; overflow-y: auto; display: flex; flex-direction: column;
+  flex-shrink: 0; overflow: hidden; display: flex; flex-direction: column;
 }
 .sidebar-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -91,8 +91,30 @@ body {
   flex-shrink: 0;
 }
 .sidebar-more { cursor: pointer; font-size: 16px; color: #555; letter-spacing: 1px; }
-.sidebar-panel { flex: 1; }
+.sidebar-panel { flex: 1; min-height: 0; overflow-y: auto; }
 .sidebar-panel.hidden { display: none; }
+
+.explorer-actions {
+  padding: 6px 8px 2px;
+}
+
+.new-file-btn {
+  width: 100%;
+  border: 1px solid #2c2c2c;
+  background: #1a1a1a;
+  color: #cfcfcf;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.new-file-btn:hover {
+  background: #202020;
+  border-color: #3a3a3a;
+}
 
 /* Tree */
 .tree { padding: 2px 0; }
@@ -110,6 +132,11 @@ body {
 }
 .tree-item:hover { background: #1e1e1e; color: #e5e5e5; }
 .tree-item.active { background: #1e3a5f; color: #e5e5e5; }
+.tree-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Search panel */
 .panel-search-box { padding: 8px; }
@@ -119,7 +146,7 @@ body {
   font-size: 12px; outline: none;
 }
 .panel-search-box input:focus { border-color: #22c55e; }
-.search-results { padding: 4px 0; overflow-y: auto; max-height: calc(100vh - 160px); }
+.search-results { padding: 4px 0; overflow-y: auto; }
 .search-result {
   padding: 5px 10px; cursor: pointer; border-bottom: 1px solid #1a1a1a;
 }
@@ -195,24 +222,10 @@ body {
   font-size: 13px; line-height: 1.9;
 }
 
-.line-numbers {
-  display: flex; flex-direction: column;
-  padding: 12px 14px 12px 0; min-width: 44px;
-  text-align: right; color: #3a3a3a; font-size: 12px;
-  user-select: none; flex-shrink: 0;
-  border-right: 1px solid #1a1a1a;
-  overflow: hidden; background: #0d0d0d;
+.monaco-host {
+  width: 100%;
+  height: 100%;
 }
-.line-numbers span { display: block; line-height: 1.9; }
-
-.code-editor {
-  flex: 1; background: transparent; border: none; outline: none;
-  color: #d4d4d4; font-family: inherit; font-size: inherit;
-  line-height: 1.9; padding: 12px 16px; resize: none;
-  overflow-y: auto; overflow-x: auto; white-space: pre;
-  tab-size: 4; caret-color: #fff;
-}
-.code-editor::selection { background: #264f78; }
 
 /* Toast */
 .toast {
@@ -242,7 +255,7 @@ body {
   padding: 8px 14px; background: #111;
   border-bottom: 1px solid #222; font-size: 12px; color: #888; flex-shrink: 0;
 }
-.preview-header span { flex: 1; }
+.preview-header span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preview-actions { display: flex; gap: 10px; }
 .preview-actions svg:hover { stroke: #ccc; }
 
@@ -262,3 +275,53 @@ body {
 }
 .status-branch:hover, .status-sync:hover { color: #ccc; }
 .php-status { display: flex; align-items: center; gap: 4px; color: #22c55e; }
+
+@media (max-width: 1050px) {
+  .menu-nav {
+    display: none;
+  }
+
+  .preview-panel {
+    width: 260px;
+  }
+
+  .sidebar {
+    width: 176px;
+  }
+}
+
+@media (max-width: 760px) {
+  .search-bar {
+    min-width: 130px;
+  }
+
+  .sidebar {
+    width: 154px;
+  }
+
+  .preview-panel {
+    display: none;
+  }
+
+  .resize-handle {
+    display: none;
+  }
+}
+
+/* ── Sessions Panel ── */
+.session-list { padding: 4px 0; }
+.session-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 10px 7px 14px; font-size: 12px; color: #aaa;
+  cursor: pointer; border-radius: 4px; margin: 1px 4px;
+  transition: background 0.1s;
+}
+.session-item:hover { background: #1e1e1e; color: #e5e5e5; }
+.session-item.active { background: #1e3a5f; color: #e5e5e5; }
+.session-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-rename {
+  opacity: 0; font-size: 13px; color: #666; padding: 0 4px;
+  cursor: pointer; flex-shrink: 0; transition: opacity 0.1s;
+}
+.session-item:hover .session-rename { opacity: 1; }
+.session-rename:hover { color: #ccc; }
